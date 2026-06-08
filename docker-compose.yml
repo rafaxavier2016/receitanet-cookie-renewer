@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  receitanet-cookie-renewer:
+    build: .
+    container_name: receitanet-cookie-renewer
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      # ===== OBRIGATORIO (vai colocar no easypanel UI) =====
+      RECEITANET_USER: ${RECEITANET_USER}
+      RECEITANET_PASS: ${RECEITANET_PASS}
+      N8N_API_URL: https://n8n-n8n.3ccrdq.easypanel.host/api/v1
+      N8N_API_KEY: ${N8N_API_KEY}
+      N8N_CREDENTIAL_ID: ZLghSJcWQTLEcuQd
+
+      # ===== AUTH DO ENDPOINT /renew (gerar 1 token aleatorio) =====
+      RENEW_AUTH_TOKEN: ${RENEW_AUTH_TOKEN}
+
+      # ===== ALERTAS WHATSAPP (RJ-NET 4406, NAO Isabella) =====
+      WEBHOOK_ALERTA_URL: https://automacoes2026.uazapi.com/send/text
+      UAZAPI_TOKEN_ALERTA: 3f32045e-304b-4e17-87c7-052d591cb352
+      RAFAEL_WHATSAPP: '553197403925'
+
+      # ===== TUNING =====
+      HEADLESS: 'true'
+      PORT: '8080'
