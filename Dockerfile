@@ -1,16 +1,25 @@
-FROM mcr.microsoft.com/playwright/python:v1.45.0-jammy
+FROM python:3.11-slim
 
 WORKDIR /app
 
-# Sem dependencias externas alem do Playwright (que ja vem na imagem base)
-# Copiamos so o script
+# Dependencias do sistema necessarias pro Chromium do Playwright + curl pro healthcheck
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl ca-certificates wget \
+    libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 \
+    libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 \
+    libgbm1 libpango-1.0-0 libcairo2 libasound2 libatspi2.0-0 \
+    libx11-6 libxcb1 libxext6 fonts-liberation \
+ && rm -rf /var/lib/apt/lists/*
+
+# Instala Playwright + baixa Chromium
+RUN pip install --no-cache-dir playwright==1.50.0 \
+ && playwright install chromium
+
 COPY renew.py /app/renew.py
 
-# Healthcheck simples
 HEALTHCHECK --interval=60s --timeout=10s --retries=3 \
   CMD curl -fs http://localhost:8080/health || exit 1
 
 EXPOSE 8080
 
-# Default: rodar como HTTP server. Pra rodar 1-shot, override CMD com: python renew.py
 CMD ["python", "renew.py", "--serve"]
