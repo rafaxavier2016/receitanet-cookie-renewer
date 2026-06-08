@@ -121,36 +121,54 @@ def renovar():
                 except: pass
                 raise RuntimeError(f"login falhou — ainda na pagina Keycloak: {erro_msg}")
 
-            log("step 6: capturando cookies")
+            # IMPORTANTE: post-login, o redirect ja terminou no callback OAuth, mas o sistema.receitanet.net
+            # so cria receitanet_session + XSRF-TOKEN quando voce ACESSA paginas autenticadas. Por isso navegamos
+            # por algumas paginas internas antes de capturar os cookies.
+            log("step 6: forcando criacao de cookies de sessao via navegacao em paginas autenticadas")
+            urls_pos_login = [
+                'https://sistema.receitanet.net/',
+                'https://sistema.receitanet.net/clientes',
+                'https://sistema.receitanet.net/financeiro',
+                'https://sistema.receitanet.net/dashboard',
+            ]
+            for url in urls_pos_login:
+                try:
+                    resp = page.goto(url, wait_until='networkidle', timeout=20000)
+                    log(f"   GET {url} -> status {resp.status if resp else '?'} url_final={page.url}")
+                    # Se redirecionou pra Keycloak = login nao terminou ainda, abortar
+                    if 'auth.receitanet.net' in page.url:
+                        log(f"   AVISO: redirecionou pra Keycloak em {url}, sessao nao estabelecida")
+                except Exception as e:
+                    log(f"   GET {url} falhou (continuando): {str(e)[:120]}")
+
+            log("step 7: capturando cookies pos-navegacao")
             cookies = ctx.cookies()
-            sistema_cookies = [c for c in cookies if 'receitanet' in c.get('domain','').lower()]
-            log(f"   {len(cookies)} cookies totais, {len(sistema_cookies)} do dominio receitanet")
+            todos_dom_log = [(c['name'], c.get('domain','?')) for c in cookies]
+            log(f"   total cookies = {len(cookies)} | {todos_dom_log}")
 
-            # O sincronizar-receitanet usa Cookie: PHPSESSID=...; outros — manda TODOS do dominio sistema.receitanet.net
-            sistema_only = [c for c in cookies if c.get('domain','').endswith('sistema.receitanet.net') or c.get('domain','') == 'sistema.receitanet.net']
-            cookie_header = '; '.join(f"{c['name']}={c['value']}" for c in sistema_only)
+            # Filtra cookies do sistema (host principal e wildcards) + qualquer XSRF-TOKEN
+            cookies_sistema = []
+            for c in cookies:
+                dom = c.get('domain','').lower().lstrip('.')
+                if dom == 'sistema.receitanet.net' or dom.endswith('.sistema.receitanet.net') or dom == 'receitanet.net' or dom.endswith('.receitanet.net'):
+                    cookies_sistema.append(c)
 
-            if not cookie_header:
-                raise RuntimeError(f"nenhum cookie do dominio sistema.receitanet.net retornado. Cookies: {[(c['name'],c['domain']) for c in cookies]}")
+            # Critico: garantir que pelo menos receitanet_session esteja presente
+            nomes_capturados = {c['name'] for c in cookies_sistema}
+            log(f"   cookies sistema capturados: {sorted(nomes_capturados)}")
 
-            log(f"step 7: cookie header montado ({len(cookie_header)} chars, {len(sistema_only)} cookies)")
+            if 'receitanet_session' not in nomes_capturados:
+                raise RuntimeError(f"cookie 'receitanet_session' nao foi criado pos-login. Cookies presentes: {sorted(nomes_capturados)}. Provavelmente o flow OAuth nao foi concluido com sucesso.")
 
-            # Verifica que sessao funciona — visita raiz do sistema, espera NAO redirecionar pra Keycloak
-            log("step 8: validando sessao via GET /")
-            try:
-                test_resp = page.goto('https://sistema.receitanet.net/', wait_until='domcontentloaded', timeout=20000)
-                final_url = page.url
-                if 'auth.receitanet.net' in final_url:
-                    raise RuntimeError(f"sessao invalida — redirecionou pra Keycloak: {final_url}")
-                if test_resp and test_resp.status >= 500:
-                    raise RuntimeError(f"sessao invalida — / retornou {test_resp.status}")
-                # 404 ou 200 em sistema.receitanet.net OK — apenas confirma que cookie valido
-                log(f"   / OK (URL final = {final_url}, status = {test_resp.status if test_resp else '?'})")
-            except RuntimeError:
-                raise
-            except Exception as e:
-                # Erro de navegacao nao-fatal — cookies ja foram capturados, podemos seguir
-                log(f"   validacao opcional falhou (ignorando): {str(e)[:200]}")
+            # Monta header. Importante: dedup por name (Playwright as vezes retorna cookie em multiplos dominios)
+            cookie_dict = {}
+            for c in cookies_sistema:
+                # Prefere cookie do dominio raiz (sistema.receitanet.net) sobre subdominios
+                if c['name'] not in cookie_dict or c.get('domain','').lstrip('.') == 'sistema.receitanet.net':
+                    cookie_dict[c['name']] = c['value']
+
+            cookie_header = '; '.join(f"{k}={v}" for k, v in cookie_dict.items())
+            log(f"step 8: cookie header montado ({len(cookie_header)} chars, {len(cookie_dict)} cookies: {sorted(cookie_dict.keys())})")
 
             return cookie_header
 
