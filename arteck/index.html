@@ -18,6 +18,13 @@ const U="https://lfeodufywzgwklnmjagz.supabase.co";
 const K="sb_publishable_4pRGZvATwKETPtm1lKX1GA_ibz00Pcc";
 (async()=>{
   try{
+    // Garante um id estavel: retoma a ultima sessao no mesmo aparelho,
+    // mesmo que o link aberto nao tenha ?id=
+    const p=new URLSearchParams(location.search);
+    let id=p.get("id")||localStorage.getItem("arteck_last_id")||(crypto.randomUUID?crypto.randomUUID():(Date.now()+"-"+Math.random().toString(16).slice(2)));
+    localStorage.setItem("arteck_last_id",id);
+    p.set("id",id);
+    history.replaceState(null,"","?"+p.toString());
     const r=await fetch(U+"/rest/v1/rpc/arteck_get_form",{method:"POST",headers:{"Content-Type":"application/json","apikey":K,"Authorization":"Bearer "+K},body:"{}"});
     if(!r.ok) throw new Error("HTTP "+r.status);
     const b64=await r.json();
