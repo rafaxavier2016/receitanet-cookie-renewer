@@ -7,20 +7,23 @@ Fluxo:
 3. Preenche username + password do env
 4. Submete form, aguarda redirect de volta pro sistema
 5. Captura cookies da sessão
-6. Atualiza credential `ZLghSJcWQTLEcuQd` no n8n via API
+6. Atualiza a credential do cookie no n8n via API
 7. Reporta status via webhook opcional (alerta WhatsApp)
+
+NENHUM valor de ambiente tem default embutido neste arquivo — host, id de
+credential, token e destino de alerta vêm todos do env. Ver .env.example.
 
 Env vars obrigatórios:
 - RECEITANET_USER         — login do ReceitaNet
 - RECEITANET_PASS         — senha do ReceitaNet
-- N8N_API_URL             — ex: https://n8n-n8n.3ccrdq.easypanel.host/api/v1
+- N8N_API_URL             — base da public API do n8n, terminando em /api/v1
 - N8N_API_KEY             — token da public API do n8n
-- N8N_CREDENTIAL_ID       — id da credential do cookie (default: ZLghSJcWQTLEcuQd)
+- N8N_CREDENTIAL_ID       — id da credential que guarda o cookie
 
 Env vars opcionais:
-- WEBHOOK_ALERTA_URL      — URL pra POST {sucesso, cookie, erro} (ex: https://automacoes2026.uazapi.com/send/text)
-- UAZAPI_TOKEN_ALERTA     — token do UazAPI RJ-NET (4406) pra alertas
-- RAFAEL_WHATSAPP         — número do Rafael (553197403925)
+- WEBHOOK_ALERTA_URL      — URL pra POST {number, text} do gateway de WhatsApp
+- UAZAPI_TOKEN_ALERTA     — token do gateway de alerta
+- ALERTA_WHATSAPP_DESTINO — número que recebe os alertas (só dígitos, com DDI)
 - HEADLESS                — "false" pra debug visual (default "true")
 
 Uso:
@@ -34,10 +37,10 @@ RECEITANET_USER = os.environ.get('RECEITANET_USER','').strip()
 RECEITANET_PASS = os.environ.get('RECEITANET_PASS','').strip()
 N8N_API_URL = os.environ.get('N8N_API_URL','').rstrip('/')
 N8N_API_KEY = os.environ.get('N8N_API_KEY','').strip()
-N8N_CREDENTIAL_ID = os.environ.get('N8N_CREDENTIAL_ID','ZLghSJcWQTLEcuQd').strip()
+N8N_CREDENTIAL_ID = os.environ.get('N8N_CREDENTIAL_ID','').strip()
 WEBHOOK_ALERTA_URL = os.environ.get('WEBHOOK_ALERTA_URL','').strip()
 UAZAPI_TOKEN_ALERTA = os.environ.get('UAZAPI_TOKEN_ALERTA','').strip()
-RAFAEL_WHATSAPP = os.environ.get('RAFAEL_WHATSAPP','553197403925').strip()
+ALERTA_WHATSAPP_DESTINO = os.environ.get('ALERTA_WHATSAPP_DESTINO','').strip()
 HEADLESS = os.environ.get('HEADLESS','true').lower() != 'false'
 
 
@@ -45,14 +48,14 @@ def log(msg):
     print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {msg}", flush=True)
 
 
-def alertar_rafael(texto):
-    """Manda mensagem ao Rafael via UazAPI RJ-NET (4406)."""
-    if not (WEBHOOK_ALERTA_URL and UAZAPI_TOKEN_ALERTA):
-        log(f"alerta skip (sem WEBHOOK_ALERTA_URL/UAZAPI_TOKEN_ALERTA): {texto[:100]}")
+def alertar_operador(texto):
+    """Manda mensagem ao operador de plantão via gateway de WhatsApp."""
+    if not (WEBHOOK_ALERTA_URL and UAZAPI_TOKEN_ALERTA and ALERTA_WHATSAPP_DESTINO):
+        log(f"alerta skip (falta WEBHOOK_ALERTA_URL/UAZAPI_TOKEN_ALERTA/ALERTA_WHATSAPP_DESTINO): {texto[:100]}")
         return
     try:
         req = urllib.request.Request(WEBHOOK_ALERTA_URL, method='POST',
-            data=json.dumps({'number': RAFAEL_WHATSAPP, 'text': texto}).encode('utf-8'),
+            data=json.dumps({'number': ALERTA_WHATSAPP_DESTINO, 'text': texto}).encode('utf-8'),
             headers={'token': UAZAPI_TOKEN_ALERTA, 'Content-Type':'application/json'})
         urllib.request.urlopen(req, timeout=15).read()
         log(f"alerta enviado ({len(texto)} chars)")
@@ -62,8 +65,8 @@ def alertar_rafael(texto):
 
 def atualizar_credential_n8n(cookie_value, allowed_domain='https://sistema.receitanet.net'):
     """Atualiza credential httpHeaderAuth no n8n com novo cookie."""
-    if not (N8N_API_URL and N8N_API_KEY):
-        raise RuntimeError("N8N_API_URL e N8N_API_KEY são obrigatórios")
+    if not (N8N_API_URL and N8N_API_KEY and N8N_CREDENTIAL_ID):
+        raise RuntimeError("N8N_API_URL, N8N_API_KEY e N8N_CREDENTIAL_ID são obrigatórios")
     payload = {
         'name': 'Cookie',
         'value': cookie_value,
@@ -180,14 +183,14 @@ def main():
     try:
         cookie = renovar()
         atualizar_credential_n8n(cookie)
-        msg = f"✅ Cookie ReceitaNet renovado\n\nCookie ({len(cookie)} chars) salvo na credential n8n ZLghSJcWQTLEcuQd.\n\nPróxima renovação automática em 3 dias."
-        alertar_rafael(msg)
+        msg = f"✅ Cookie ReceitaNet renovado\n\nCookie ({len(cookie)} chars) salvo na credential n8n configurada.\n\nPróxima renovação automática em 3 dias."
+        alertar_operador(msg)
         log("SUCESSO")
         return 0
     except Exception as e:
         log(f"FALHA: {e}")
         msg = f"🚨 *Falha na renovação automática do cookie ReceitaNet*\n\nErro: {str(e)[:400]}\n\nAção: renovar manualmente via Cookie-Editor enquanto investigo."
-        alertar_rafael(msg)
+        alertar_operador(msg)
         return 1
 
 
@@ -205,11 +208,11 @@ def serve():
             try:
                 cookie = renovar()
                 atualizar_credential_n8n(cookie)
-                alertar_rafael(f"✅ Cookie ReceitaNet renovado ({len(cookie)} chars)")
+                alertar_operador(f"✅ Cookie ReceitaNet renovado ({len(cookie)} chars)")
                 body = json.dumps({'ok': True, 'cookie_len': len(cookie)}).encode('utf-8')
                 self.send_response(200)
             except Exception as e:
-                alertar_rafael(f"🚨 Falha renovação cookie: {str(e)[:300]}")
+                alertar_operador(f"🚨 Falha renovação cookie: {str(e)[:300]}")
                 body = json.dumps({'ok': False, 'erro': str(e)}).encode('utf-8')
                 self.send_response(500)
             self.send_header('Content-Type','application/json')
