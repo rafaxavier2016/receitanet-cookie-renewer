@@ -1,0 +1,8 @@
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+cookies.json
+__pycache__/
+*.pyc
